@@ -85,18 +85,22 @@ class Datum:
         label (int): class label.
         domain (int): domain label.
         classname (str): class name.
+        _image_data (numpy.ndarray, optional): Image data if loading directly from memory.
     """
 
-    def __init__(self, impath='', label=0, domain=-1, classname=''):
+    def __init__(self, impath='', label=0, domain=-1, classname='', _image_data=None):
         assert isinstance(impath, str)
         assert isinstance(label, int)
         assert isinstance(domain, int)
         assert isinstance(classname, str)
+        if _image_data is not None:
+            assert isinstance(_image_data, np.ndarray)
 
         self._impath = impath
         self._label = label
         self._domain = domain
         self._classname = classname
+        self._image_data = _image_data
 
     @property
     def impath(self):
@@ -113,6 +117,16 @@ class Datum:
     @property
     def classname(self):
         return self._classname
+
+    @property
+    def has_image_data(self):
+        return self._image_data is not None
+
+    def get_image_data(self):
+        """Get the image data if available."""
+        if self._image_data is not None:
+            return Image.fromarray(self._image_data)
+        return None
 
 
 class DatasetBase:
@@ -290,7 +304,11 @@ class DatasetWrapper(TorchDataset):
             'impath': item.impath
         }
 
-        img0 = read_image(item.impath)
+        # Try to get image data from the item first
+        if hasattr(item, 'has_image_data') and item.has_image_data:
+            img0 = item.get_image_data()
+        else:
+            img0 = read_image(item.impath)
 
         if self.transform is not None:
             if isinstance(self.transform, (list, tuple)):

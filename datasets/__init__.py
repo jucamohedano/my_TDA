@@ -12,6 +12,7 @@ from .imagenetv2 import ImageNetV2
 from .imagenet_a import ImageNetA
 from .imagenet_r import ImageNetR
 from .imagenet_sketch import ImageNetSketch
+from .cifar10c import CIFAR10C
 
 
 dataset_list = {
@@ -29,8 +30,22 @@ dataset_list = {
                 "imagenet-v": ImageNetV2,
                 "imagenet-r": ImageNetR,
                 "imagenet-s": ImageNetSketch,
+                "cifar10-c": CIFAR10C,
                 }
 
 
-def build_dataset(dataset, root_path):
-    return dataset_list[dataset](root_path)
+def build_dataset(dataset, root_path, **kwargs):
+    """Build a dataset.
+    
+    Args:
+        dataset (str): Dataset name.
+        root_path (str): Root path to the dataset.
+        **kwargs: Additional arguments to pass to the dataset constructor.
+            For CIFAR-10-C, these include:
+            - corruption_type (str): Type of corruption
+            - severity (int): Severity level (1-5)
+    """
+    if dataset not in dataset_list:
+        raise ValueError(f"Dataset {dataset} not found. Available datasets: {list(dataset_list.keys())}")
+    
+    return dataset_list[dataset](root_path, **kwargs)

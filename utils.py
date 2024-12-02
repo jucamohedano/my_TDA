@@ -16,6 +16,14 @@ try:
 except ImportError:
     BICUBIC = Image.BICUBIC
 
+# Add CIFAR-10-C corruptions list
+CIFAR10C_CORRUPTIONS = [
+    'brightness', 'contrast', 'defocus_blur', 'elastic_transform',
+    'fog', 'frost', 'gaussian_noise', 'glass_blur', 'impulse_noise',
+    'jpeg_compression', 'motion_blur', 'pixelate', 'shot_noise',
+    'snow', 'zoom_blur'
+]
+
 def get_entropy(loss, clip_weights):
     max_entropy = math.log2(clip_weights.size(1))
     return float(loss / max_entropy)
@@ -110,6 +118,8 @@ def get_config_file(config_path, dataset_name):
         config_name = "imagenet.yaml"
     elif dataset_name in ["A", "V", "R", "S"]:
         config_name = f"imagenet_{dataset_name.lower()}.yaml"
+    elif dataset_name == "C":
+        config_name = "cifar10c.yaml"
     else:
         config_name = f"{dataset_name}.yaml"
     
@@ -134,11 +144,29 @@ def build_test_data_loader(dataset_name, root_path, preprocess):
         dataset = build_dataset(f"imagenet-{dataset_name.lower()}", root_path)
         test_loader = build_data_loader(data_source=dataset.test, batch_size=1, is_train=False, tfm=preprocess, shuffle=True)
 
+    elif dataset_name == 'C':
+        # For CIFAR-10-C, we'll test on all corruptions and severities
+        all_results = []
+        for corruption in CIFAR10C_CORRUPTIONS:
+            for severity in range(1, 6):
+                # Create dataset with transform
+                dataset = build_dataset("cifar10-c", root_path, corruption_type=corruption, severity=severity)
+                # Create data loader directly since CIFAR10C is already a Dataset
+                test_loader = torch.utils.data.DataLoader(
+                    dataset,
+                    batch_size=1,
+                    num_workers=8,
+                    shuffle=True,
+                    pin_memory=(torch.cuda.is_available())
+                )
+                all_results.append((test_loader, dataset.classnames, dataset.template))
+        return all_results
+
     elif dataset_name in ['caltech101','dtd','eurosat','fgvc','food101','oxford_flowers','oxford_pets','stanford_cars','sun397','ucf101']:
         dataset = build_dataset(dataset_name, root_path)
         test_loader = build_data_loader(data_source=dataset.test, batch_size=1, is_train=False, tfm=preprocess, shuffle=True)
     
     else:
-        raise "Dataset is not from the chosen list"
+        raise ValueError("Dataset is not from the chosen list")
     
     return test_loader, dataset.classnames, dataset.template
