@@ -3,6 +3,8 @@ import argparse
 import wandb
 from tqdm import tqdm
 from datetime import datetime
+import time
+import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -67,6 +69,14 @@ def compute_cache_logits(image_features, cache, alpha, beta, clip_weights, neg_m
 def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
     with torch.no_grad():
         pos_cache, neg_cache, accuracies = {}, {}, []
+        cache_stats = {
+            'pos_cache_size': [],
+            'neg_cache_size': [],
+            'cache_update_times': [],
+            'inference_times': [],
+            'pre_cache_accuracies': [],
+            'post_cache_accuracies': []
+        }
         
         #Unpack all hyperparameters
         pos_enabled, neg_enabled = pos_cfg['enabled'], neg_cfg['enabled']
@@ -77,14 +87,23 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
 
         #Test-time adaptation
         for i, (images, target) in enumerate(tqdm(loader, desc='Processed test images: ')):
+            start_time = time.time()
             image_features, clip_logits, loss, prob_map, pred = get_clip_logits(images ,clip_model, clip_weights)
             target, prop_entropy = target.cuda(), get_entropy(loss, clip_weights)
+            
+            # Track pre-cache accuracy
+            pre_cache_acc = cls_acc(clip_logits, target)
+            cache_stats['pre_cache_accuracies'].append(pre_cache_acc)
 
+            cache_update_start = time.time()
             if pos_enabled:
                 update_cache(pos_cache, pred, [image_features, loss], pos_params['shot_capacity'])
 
             if neg_enabled and neg_params['entropy_threshold']['lower'] < prop_entropy < neg_params['entropy_threshold']['upper']:
                 update_cache(neg_cache, pred, [image_features, loss, prob_map], neg_params['shot_capacity'], True)
+            
+            cache_update_time = time.time() - cache_update_start
+            cache_stats['cache_update_times'].append(cache_update_time)
 
             final_logits = clip_logits.clone()
             if pos_enabled and pos_cache:
@@ -92,14 +111,44 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
             if neg_enabled and neg_cache:
                 final_logits -= compute_cache_logits(image_features, neg_cache, neg_params['alpha'], neg_params['beta'], clip_weights, (neg_params['mask_threshold']['lower'], neg_params['mask_threshold']['upper']))
 
-                
-            acc = cls_acc(final_logits, target)  
-            accuracies.append(acc)
-            wandb.log({"Averaged test accuracy": sum(accuracies)/len(accuracies)}, commit=True)
+            # Track post-cache accuracy and inference time
+            post_cache_acc = cls_acc(final_logits, target)
+            inference_time = time.time() - start_time
+            
+            cache_stats['post_cache_accuracies'].append(post_cache_acc)
+            cache_stats['inference_times'].append(inference_time)
+            cache_stats['pos_cache_size'].append(sum(len(v) for v in pos_cache.values()))
+            cache_stats['neg_cache_size'].append(sum(len(v) for v in neg_cache.values()))
+            
+            accuracies.append(post_cache_acc)
+            
+            # Log metrics to wandb
+            if i % 100 == 0:  # Log every 100 steps to avoid overwhelming wandb
+                wandb.log({
+                    "Averaged test accuracy": sum(accuracies)/len(accuracies),
+                    "Pre-cache accuracy": pre_cache_acc,
+                    "Post-cache accuracy": post_cache_acc,
+                    "Cache update time (s)": cache_update_time,
+                    "Total inference time (s)": inference_time,
+                    "Positive cache size": cache_stats['pos_cache_size'][-1],
+                    "Negative cache size": cache_stats['neg_cache_size'][-1],
+                    "Samples processed": i
+                }, commit=True)
 
             if i%1000==0:
                 print("---- TDA's test accuracy: {:.2f}. ----\n".format(sum(accuracies)/len(accuracies)))
-        print("---- TDA's test accuracy: {:.2f}. ----\n".format(sum(accuracies)/len(accuracies)))   
+        
+        # Log final statistics
+        wandb.log({
+            "Final test accuracy": sum(accuracies)/len(accuracies),
+            "Average cache update time": np.mean(cache_stats['cache_update_times']),
+            "Average inference time": np.mean(cache_stats['inference_times']),
+            "Average pre-cache accuracy": np.mean(cache_stats['pre_cache_accuracies']),
+            "Average post-cache accuracy": np.mean(cache_stats['post_cache_accuracies']),
+            "Final positive cache size": cache_stats['pos_cache_size'][-1],
+            "Final negative cache size": cache_stats['neg_cache_size'][-1]
+        })
+        
         return sum(accuracies)/len(accuracies)
 
 
@@ -138,6 +187,8 @@ def main():
             if args.wandb:
                 run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name)
 
+            all_accs = []  # Initialize list to store accuracies for average calculation
+
             for loader_idx, (test_loader, classnames, template) in enumerate(test_loaders):
                 # Calculate corruption type and severity
                 corruption_idx = loader_idx // 5  # Integer division to get corruption index
@@ -147,21 +198,31 @@ def main():
                 print(f"\nTesting on corruption: {corruption_type}, severity: {severity}")
                 clip_weights = clip_classifier(classnames, template, clip_model)
 
+                # Finish the previous run if it exists
+                if args.wandb and 'run' in locals():
+                    run.finish()
+
+                # Add run name for W&B
+                if args.wandb:
+                    run_name = f"cifar10c_{corruption_type}_s{severity}_2"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
                 acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
                 all_accs.append(acc)
 
                 if args.wandb:
                     wandb.log({
-                        f"cifar10c_{corruption_type}_s{severity}": acc,
+                        f"cifar10c_{corruption_type}_s{severity}_2": acc,
                         "corruption_type": corruption_type,
                         "severity": severity
                     })
 
-            # Print and log average results
-            avg_acc = sum(all_accs) / len(all_accs)
-            print(f"\nAverage accuracy across all corruptions: {avg_acc:.2f}")
-            if args.wandb:
-                wandb.log({"cifar10c_average": avg_acc})
+            # Calculate and log average accuracy across all corruptions
+            if all_accs:  # Ensure there are accuracies to average
+                avg_acc = sum(all_accs) / len(all_accs)
+                print(f"\nAverage accuracy across all corruptions: {avg_acc:.2f}")
+                if args.wandb:
+                    wandb.log({"cifar10c_average": avg_acc})
 
             # Finish the W&B run after the loop
             if args.wandb:
