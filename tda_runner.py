@@ -129,18 +129,56 @@ def main():
         print("\nRunning dataset configurations:")
         print(cfg, "\n")
         
-        test_loader, classnames, template = build_test_data_loader(dataset_name, args.data_root, preprocess)
-        clip_weights = clip_classifier(classnames, template, clip_model)
+        if dataset_name == 'C':
+            # Special handling for CIFAR-10-C
+            test_loaders = build_test_data_loader(dataset_name, args.data_root, preprocess)
+            all_accs = []
+            
+            # Initialize W&B once before the loop
+            if args.wandb:
+                run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name)
 
-        if args.wandb:
-            run_name = f"{dataset_name}"
-            run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+            for loader_idx, (test_loader, classnames, template) in enumerate(test_loaders):
+                # Calculate corruption type and severity
+                corruption_idx = loader_idx // 5  # Integer division to get corruption index
+                severity = (loader_idx % 5) + 1   # Remainder + 1 to get severity level
+                corruption_type = CIFAR10C_CORRUPTIONS[corruption_idx]
+                
+                print(f"\nTesting on corruption: {corruption_type}, severity: {severity}")
+                clip_weights = clip_classifier(classnames, template, clip_model)
 
-        acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+                all_accs.append(acc)
 
-        if args.wandb:
-            wandb.log({f"{dataset_name}": acc})
-            run.finish()
+                if args.wandb:
+                    wandb.log({
+                        f"cifar10c_{corruption_type}_s{severity}": acc,
+                        "corruption_type": corruption_type,
+                        "severity": severity
+                    })
+
+            # Print and log average results
+            avg_acc = sum(all_accs) / len(all_accs)
+            print(f"\nAverage accuracy across all corruptions: {avg_acc:.2f}")
+            if args.wandb:
+                wandb.log({"cifar10c_average": avg_acc})
+
+            # Finish the W&B run after the loop
+            if args.wandb:
+                run.finish()
+        else:
+            test_loader, classnames, template = build_test_data_loader(dataset_name, args.data_root, preprocess)
+            clip_weights = clip_classifier(classnames, template, clip_model)
+
+            if args.wandb:
+                run_name = f"{dataset_name}"
+                run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+            acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+            if args.wandb:
+                wandb.log({f"{dataset_name}": acc})
+                run.finish()
 
 if __name__ == "__main__":
     main()
