@@ -32,21 +32,47 @@ def update_cache(cache, pred, features_loss, shot_capacity, include_prob_map=Fal
     """Update cache with new features and loss, maintaining the maximum shot capacity."""
     with torch.no_grad():
         item = features_loss if not include_prob_map else features_loss[:2] + [features_loss[2]]
+        cache_stats = {'hit': False}  # Track if this was a cache hit
+        
         if pred in cache:
             if len(cache[pred]) < shot_capacity:
                 cache[pred].append(item)
+                cache_stats['hit'] = False  # Cache miss (new entry added)
             elif features_loss[1] < cache[pred][-1][1]:
                 cache[pred][-1] = item
+                cache_stats['hit'] = True  # Cache hit (entry updated)
             cache[pred] = sorted(cache[pred], key=operator.itemgetter(1))
         else:
             cache[pred] = [item]
+            cache_stats['hit'] = False  # Cache miss (new class)
+        
+        return cache_stats
 
 
 def compute_cache_logits(image_features, cache, alpha, beta, clip_weights, neg_mask_thresholds=None):
-    """Compute logits using positive/negative cache."""
+    """Compute logits using positive/negative cache.
+    
+    Metrics calculated:
+    - Cache hits: Number of times cached features have high similarity (>0.5) with query
+    - Total queries: Total number of similarity comparisons made
+    - Hit rate: Ratio of cache hits to total queries
+    
+    Args:
+        image_features: Query features to compare against cache
+        cache: Dictionary of cached features
+        alpha: Learning rate for cache contribution
+        beta: Scaling factor for similarity computation
+        clip_weights: Original CLIP model weights
+        neg_mask_thresholds: Thresholds for negative cache (optional)
+    
+    Returns:
+        tuple: (Modified logits, Cache statistics)
+    """
     with torch.no_grad():
         cache_keys = []
         cache_values = []
+        cache_stats = {'hits': 0, 'total_queries': 0}
+        
         for class_index in sorted(cache.keys()):
             for item in cache[class_index]:
                 cache_keys.append(item[0])
@@ -55,6 +81,9 @@ def compute_cache_logits(image_features, cache, alpha, beta, clip_weights, neg_m
                 else:
                     cache_values.append(class_index)
 
+        if not cache_keys:  # Empty cache
+            return torch.zeros_like(clip_weights[0]), cache_stats
+
         cache_keys = torch.cat(cache_keys, dim=0).permute(1, 0)
         if neg_mask_thresholds:
             cache_values = torch.cat(cache_values, dim=0)
@@ -62,20 +91,54 @@ def compute_cache_logits(image_features, cache, alpha, beta, clip_weights, neg_m
         else:
             cache_values = (F.one_hot(torch.Tensor(cache_values).to(torch.int64), num_classes=clip_weights.size(1))).cuda().half()
 
-        affinity = image_features @ cache_keys
+        # Compute similarity between query and cached features
+        affinity = image_features @ cache_keys  # Shape: (batch_size, num_cached_features)
+        
+        # Calculate cache hit statistics
+        cache_stats['total_queries'] = affinity.size(0) * affinity.size(1)  # Total comparisons made
+        cache_stats['hits'] = torch.sum(affinity > 0.5).item()  # Count similarities above threshold
+        
         cache_logits = ((-1) * (beta - beta * affinity)).exp() @ cache_values
-        return alpha * cache_logits
+        return alpha * cache_logits, cache_stats
 
 def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
+    """Run test-time adaptation with comprehensive metric tracking.
+    
+    Metrics tracked:
+    1. Accuracy:
+       - Pre-cache: CLIP model accuracy before cache
+       - Post-cache: Final accuracy after applying cache
+       - Average: Running mean of post-cache accuracy
+    
+    2. Cache Performance:
+       - Hit rates: Ratio of successful cache retrievals
+       - Cache sizes: Number of entries in pos/neg caches
+       - Memory usage: Total memory consumed by caches (MB)
+    
+    3. Timing:
+       - Cache update time: Time spent updating caches
+       - Inference time: Total processing time per batch
+    
+    4. Efficiency:
+       - Memory efficiency: Accuracy gain per MB of cache
+       - Time efficiency: Accuracy gain per second
+    """
     with torch.no_grad():
         pos_cache, neg_cache, accuracies = {}, {}, []
         cache_stats = {
-            'pos_cache_size': [],
-            'neg_cache_size': [],
-            'cache_update_times': [],
-            'inference_times': [],
-            'pre_cache_accuracies': [],
-            'post_cache_accuracies': []
+            'pos_cache_size': [],      # Number of entries in positive cache
+            'neg_cache_size': [],      # Number of entries in negative cache
+            'cache_update_times': [],  # Time spent updating caches
+            'inference_times': [],     # Total processing time per batch
+            'pre_cache_accuracies': [], # CLIP accuracy before cache
+            'post_cache_accuracies': [], # Final accuracy after cache
+            'memory_usage': [],        # Total cache memory usage in MB
+            'pos_cache_hits': [],      # Successful positive cache retrievals
+            'pos_cache_misses': [],    # Failed positive cache retrievals
+            'neg_cache_hits': [],      # Successful negative cache retrievals
+            'neg_cache_misses': [],    # Failed negative cache retrievals
+            'pos_cache_hit_rates': [], # Positive cache hit ratios
+            'neg_cache_hit_rates': []  # Negative cache hit ratios
         }
         
         #Unpack all hyperparameters
@@ -88,7 +151,7 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
         #Test-time adaptation
         for i, (images, target) in enumerate(tqdm(loader, desc='Processed test images: ')):
             start_time = time.time()
-            image_features, clip_logits, loss, prob_map, pred = get_clip_logits(images ,clip_model, clip_weights)
+            image_features, clip_logits, loss, prob_map, pred = get_clip_logits(images, clip_model, clip_weights)
             target, prop_entropy = target.cuda(), get_entropy(loss, clip_weights)
             
             # Track pre-cache accuracy
@@ -96,34 +159,63 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
             cache_stats['pre_cache_accuracies'].append(pre_cache_acc)
 
             cache_update_start = time.time()
+            pos_update_stats = {'hit': False}
+            neg_update_stats = {'hit': False}
+            
             if pos_enabled:
-                update_cache(pos_cache, pred, [image_features, loss], pos_params['shot_capacity'])
+                pos_update_stats = update_cache(pos_cache, pred, [image_features, loss], pos_params['shot_capacity'])
 
             if neg_enabled and neg_params['entropy_threshold']['lower'] < prop_entropy < neg_params['entropy_threshold']['upper']:
-                update_cache(neg_cache, pred, [image_features, loss, prob_map], neg_params['shot_capacity'], True)
+                neg_update_stats = update_cache(neg_cache, pred, [image_features, loss, prob_map], neg_params['shot_capacity'], True)
             
             cache_update_time = time.time() - cache_update_start
             cache_stats['cache_update_times'].append(cache_update_time)
 
             final_logits = clip_logits.clone()
+            pos_query_stats = {'hits': 0, 'total_queries': 0}
+            neg_query_stats = {'hits': 0, 'total_queries': 0}
+            
             if pos_enabled and pos_cache:
-                final_logits += compute_cache_logits(image_features, pos_cache, pos_params['alpha'], pos_params['beta'], clip_weights)
+                pos_logits, pos_query_stats = compute_cache_logits(image_features, pos_cache, pos_params['alpha'], pos_params['beta'], clip_weights)
+                final_logits += pos_logits
             if neg_enabled and neg_cache:
-                final_logits -= compute_cache_logits(image_features, neg_cache, neg_params['alpha'], neg_params['beta'], clip_weights, (neg_params['mask_threshold']['lower'], neg_params['mask_threshold']['upper']))
+                neg_logits, neg_query_stats = compute_cache_logits(image_features, neg_cache, neg_params['alpha'], neg_params['beta'], clip_weights, (neg_params['mask_threshold']['lower'], neg_params['mask_threshold']['upper']))
+                final_logits -= neg_logits
+
+            # Update cache hit/miss statistics
+            cache_stats['pos_cache_hits'].append(pos_query_stats['hits'])
+            cache_stats['pos_cache_misses'].append(pos_query_stats['total_queries'] - pos_query_stats['hits'])
+            cache_stats['neg_cache_hits'].append(neg_query_stats['hits'])
+            cache_stats['neg_cache_misses'].append(neg_query_stats['total_queries'] - neg_query_stats['hits'])
+            
+            # Calculate hit rates
+            pos_hit_rate = pos_query_stats['hits'] / max(pos_query_stats['total_queries'], 1)
+            neg_hit_rate = neg_query_stats['hits'] / max(neg_query_stats['total_queries'], 1)
+            cache_stats['pos_cache_hit_rates'].append(pos_hit_rate)
+            cache_stats['neg_cache_hit_rates'].append(neg_hit_rate)
 
             # Track post-cache accuracy and inference time
             post_cache_acc = cls_acc(final_logits, target)
             inference_time = time.time() - start_time
             
+            # Calculate memory usage (in MB)
+            pos_cache_size = sum(sum(feat[0].nelement() * feat[0].element_size() for feat in items) 
+                               for items in pos_cache.values())
+            neg_cache_size = sum(sum(feat[0].nelement() * feat[0].element_size() for feat in items) 
+                               for items in neg_cache.values())
+            total_memory = (pos_cache_size + neg_cache_size) / (1024 * 1024)  # Convert to MB
+            
+            # Update all statistics
             cache_stats['post_cache_accuracies'].append(post_cache_acc)
             cache_stats['inference_times'].append(inference_time)
             cache_stats['pos_cache_size'].append(sum(len(v) for v in pos_cache.values()))
             cache_stats['neg_cache_size'].append(sum(len(v) for v in neg_cache.values()))
+            cache_stats['memory_usage'].append(total_memory)
             
             accuracies.append(post_cache_acc)
             
-            # Log metrics to wandb
-            if i % 100 == 0:  # Log every 100 steps to avoid overwhelming wandb
+            # Log metrics to wandb every 100 steps
+            if i % 100 == 0:
                 wandb.log({
                     "Averaged test accuracy": sum(accuracies)/len(accuracies),
                     "Pre-cache accuracy": pre_cache_acc,
@@ -132,11 +224,27 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
                     "Total inference time (s)": inference_time,
                     "Positive cache size": cache_stats['pos_cache_size'][-1],
                     "Negative cache size": cache_stats['neg_cache_size'][-1],
+                    "Memory usage (MB)": total_memory,
+                    "Positive cache hit rate": pos_hit_rate,
+                    "Negative cache hit rate": neg_hit_rate,
+                    "Positive cache hits": pos_query_stats['hits'],
+                    "Positive cache misses": pos_query_stats['total_queries'] - pos_query_stats['hits'],
+                    "Negative cache hits": neg_query_stats['hits'],
+                    "Negative cache misses": neg_query_stats['total_queries'] - neg_query_stats['hits'],
                     "Samples processed": i
                 }, commit=True)
 
             if i%1000==0:
-                print("---- TDA's test accuracy: {:.2f}. ----\n".format(sum(accuracies)/len(accuracies)))
+                print(f"---- TDA's test accuracy: {sum(accuracies)/len(accuracies):.2f}. Memory usage: {total_memory:.2f}MB ----")
+                print(f"---- Cache hit rates - Pos: {pos_hit_rate:.2f}, Neg: {neg_hit_rate:.2f} ----\n")
+        
+        # Calculate final cache statistics
+        avg_pos_hit_rate = np.mean(cache_stats['pos_cache_hit_rates'])
+        avg_neg_hit_rate = np.mean(cache_stats['neg_cache_hit_rates'])
+        total_pos_hits = sum(cache_stats['pos_cache_hits'])
+        total_pos_misses = sum(cache_stats['pos_cache_misses'])
+        total_neg_hits = sum(cache_stats['neg_cache_hits'])
+        total_neg_misses = sum(cache_stats['neg_cache_misses'])
         
         # Log final statistics
         wandb.log({
@@ -146,7 +254,15 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
             "Average pre-cache accuracy": np.mean(cache_stats['pre_cache_accuracies']),
             "Average post-cache accuracy": np.mean(cache_stats['post_cache_accuracies']),
             "Final positive cache size": cache_stats['pos_cache_size'][-1],
-            "Final negative cache size": cache_stats['neg_cache_size'][-1]
+            "Final negative cache size": cache_stats['neg_cache_size'][-1],
+            "Final memory usage (MB)": cache_stats['memory_usage'][-1],
+            "Average memory usage (MB)": np.mean(cache_stats['memory_usage']),
+            "Average positive cache hit rate": avg_pos_hit_rate,
+            "Average negative cache hit rate": avg_neg_hit_rate,
+            "Total positive cache hits": total_pos_hits,
+            "Total positive cache misses": total_pos_misses,
+            "Total negative cache hits": total_neg_hits,
+            "Total negative cache misses": total_neg_misses
         })
         
         return sum(accuracies)/len(accuracies)

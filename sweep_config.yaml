@@ -3,7 +3,7 @@ method: bayes
 metric:
   name: Averaged test accuracy
   goal: maximize
-
+project: ETTA-CLIP
 parameters:
   positive.shot_capacity:
     distribution: int_uniform
@@ -37,12 +37,28 @@ parameters:
     distribution: uniform
     min: 0.4
     max: 0.7
+  compute_budget:
+    distribution: uniform
+    min: 0.1
+    max: 0.5
+  memory_budget:
+    distribution: int_uniform
+    min: 100
+    max: 1000
+  min_samples_required:
+    distribution: int_uniform
+    min: 100
+    max: 1000
+  adaptation_window:
+    distribution: int_uniform
+    min: 50
+    max: 500
 
 command:
   - ${env}
   - python
   - ${program}
-  - --config=configs/imagenet.yaml
+  - --config=configs
   - --wandb-log
   - --datasets=I
-  - --backbone=RN50 
+  - --backbone=RN50
