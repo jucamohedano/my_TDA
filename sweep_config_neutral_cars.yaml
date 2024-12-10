@@ -1,0 +1,70 @@
+program: tda_runner_with_neutral.py
+method: bayes
+metric:
+  name: Averaged test accuracy
+  goal: maximize
+project: ETTA-CLIP-Neutral
+parameters:
+  # Positive cache parameters (smaller ranges based on stanford_cars.yaml)
+  positive.shot_capacity:
+    distribution: int_uniform
+    min: 2
+    max: 4
+  positive.alpha:
+    distribution: uniform
+    min: 0.8
+    max: 1.2
+  positive.beta:
+    distribution: uniform
+    min: 6.0
+    max: 8.0
+
+  # Negative cache parameters (keeping original values)
+  negative.shot_capacity:
+    value: 2
+  negative.alpha:
+    value: 0.117
+  negative.beta:
+    value: 1.0
+  negative.entropy_threshold.lower:
+    value: 0.2
+  negative.entropy_threshold.upper:
+    value: 0.5
+  negative.mask_threshold.lower:
+    value: 0.03
+  negative.mask_threshold.upper:
+    value: 1.0
+
+  # Neutral cache parameters (new)
+  neutral.enabled:
+    value: true
+  neutral.shot_capacity:
+    distribution: int_uniform
+    min: 2
+    max: 4
+  neutral.alpha:
+    distribution: uniform
+    min: 0.3
+    max: 0.7
+  neutral.beta:
+    distribution: uniform
+    min: 2.0
+    max: 4.0
+  neutral.weight:
+    distribution: uniform
+    min: 0.3
+    max: 0.7
+  neutral.entropy_threshold.lower:
+    value: 0.2  # Same as negative's lower
+  neutral.entropy_threshold.upper:
+    value: 0.5  # Same as negative's upper
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config=configs/stanford_cars_neutral_base.yaml
+  - --wandb-log
+  - --datasets=stanford_cars
+  - --backbone=RN50
+  - --use-neutral-cache 

@@ -1,0 +1,27 @@
+# Base configuration for TDA with Waiting List
+
+# --- Positive Cache Configuration ---
+positive:
+  enabled: True
+  shot_capacity: 3
+  alpha: 1.0
+  beta: 7.0 
+
+# --- Negative Cache Configuration ---
+negative:
+  enabled: True
+  shot_capacity: 2
+  alpha: 0.117
+  beta: 1.0
+  entropy_threshold:
+    lower: 0.2
+    upper: 0.5 
+  mask_threshold:
+    lower: 0.03
+    upper: 1.0
+
+# --- Waiting List Configuration ---
+waiting:
+  enabled: True
+  max_iterations: 10
+  confidence_threshold: 0.5 

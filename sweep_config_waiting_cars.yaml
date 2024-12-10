@@ -1,0 +1,62 @@
+program: tda_runner_with_waiting.py
+method: bayes
+metric:
+  name: Averaged test accuracy
+  goal: maximize
+project: ETTA-CLIP-Waiting
+parameters:
+  # Positive cache parameters (smaller ranges around known good values)
+  positive.shot_capacity:
+    distribution: int_uniform
+    min: 2
+    max: 4
+  positive.alpha:
+    distribution: uniform
+    min: 0.8
+    max: 1.2
+  positive.beta:
+    distribution: uniform
+    min: 6.0
+    max: 8.0
+
+  # Negative cache parameters (keeping original values)
+  negative.shot_capacity:
+    value: 2
+  negative.alpha:
+    value: 0.117
+  negative.beta:
+    value: 1.0
+  negative.entropy_threshold.lower:
+    distribution: uniform
+    min: 0.15
+    max: 0.25
+  negative.entropy_threshold.upper:
+    distribution: uniform
+    min: 0.45
+    max: 0.55
+  negative.mask_threshold.lower:
+    value: 0.03
+  negative.mask_threshold.upper:
+    value: 1.0
+
+  # Waiting list parameters
+  waiting.enabled:
+    value: true
+  waiting.max_iterations:
+    distribution: int_uniform
+    min: 5
+    max: 15
+  waiting.confidence_threshold:
+    distribution: uniform
+    min: 0.3
+    max: 0.7
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config=configs/stanford_cars_waiting_base.yaml
+  - --wandb-log
+  - --datasets=stanford_cars
+  - --backbone=RN50
+  - --use-waiting-list 

@@ -1,0 +1,39 @@
+program: tda_runner.py
+method: grid
+metric:
+  name: Averaged test accuracy
+  goal: maximize
+project: ETTA-CLIP-Ablation
+parameters:
+  # Test shot capacity variations while keeping other parameters fixed
+  positive.shot_capacity:
+    values: [1, 2, 3, 4, 5]  # Base value is 3
+  positive.alpha:
+    value: 1.0
+  positive.beta:
+    value: 7.0
+
+  # Keep negative cache parameters fixed
+  negative.shot_capacity:
+    value: 2
+  negative.alpha:
+    value: 0.117
+  negative.beta:
+    value: 1.0
+  negative.entropy_threshold.lower:
+    value: 0.2
+  negative.entropy_threshold.upper:
+    value: 0.5
+  negative.mask_threshold.lower:
+    value: 0.03
+  negative.mask_threshold.upper:
+    value: 1.0
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config=configs/stanford_cars.yaml
+  - --wandb-log
+  - --datasets=stanford_cars
+  - --backbone=RN50 

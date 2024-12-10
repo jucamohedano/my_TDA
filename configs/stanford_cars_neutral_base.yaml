@@ -1,0 +1,32 @@
+# Base configuration for TDA with Neutral Cache
+
+# --- Positive Cache Configuration ---
+positive:
+  enabled: True
+  shot_capacity: 3
+  alpha: 1.0
+  beta: 7.0 
+
+# --- Negative Cache Configuration ---
+negative:
+  enabled: True
+  shot_capacity: 2
+  alpha: 0.117
+  beta: 1.0
+  entropy_threshold:
+    lower: 0.2
+    upper: 0.5 
+  mask_threshold:
+    lower: 0.03
+    upper: 1.0
+
+# --- Neutral Cache Configuration ---
+neutral:
+  enabled: True
+  shot_capacity: 3
+  alpha: 0.5
+  beta: 3.0
+  weight: 0.5
+  entropy_threshold:
+    lower: 0.2
+    upper: 0.5

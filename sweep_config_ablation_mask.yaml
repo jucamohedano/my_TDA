@@ -1,0 +1,42 @@
+program: tda_runner.py
+method: grid
+metric:
+  name: Averaged test accuracy
+  goal: maximize
+project: ETTA-CLIP-Ablation
+# Testing negative mask threshold sensitivity
+parameters:
+  # Keep positive cache parameters fixed
+  positive.shot_capacity:
+    value: 3
+  positive.alpha:
+    value: 1.0
+  positive.beta:
+    value: 7.0
+
+  # Keep other negative cache parameters fixed
+  negative.shot_capacity:
+    value: 2
+  negative.alpha:
+    value: 0.117
+  negative.beta:
+    value: 1.0
+  negative.entropy_threshold.lower:
+    value: 0.2
+  negative.entropy_threshold.upper:
+    value: 0.5
+
+  # Test mask threshold variations
+  negative.mask_threshold.lower:
+    values: [0.01, 0.02, 0.03, 0.04, 0.05]  # Base value is 0.03
+  negative.mask_threshold.upper:
+    values: [0.7, 0.8, 0.85, 0.9, 0.95, 1.0]  # Base value is 1.0
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config=configs/stanford_cars.yaml
+  - --wandb-log
+  - --datasets=stanford_cars
+  - --backbone=RN50 

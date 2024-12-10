@@ -114,23 +114,38 @@ def get_ood_preprocess():
 
 
 def get_config_file(config_path, dataset_name):
-    if dataset_name == "I":
-        config_name = "imagenet.yaml"
-    elif dataset_name in ["A", "V", "R", "S"]:
-        config_name = f"imagenet_{dataset_name.lower()}.yaml"
-    elif dataset_name == "C":
-        config_name = "cifar10c.yaml"
+    """Get configuration file for the dataset.
+    
+    Args:
+        config_path: Either a direct path to a config file or a directory containing config files
+        dataset_name: Name of the dataset
+    
+    Returns:
+        cfg: Configuration dictionary
+    """
+    # If config_path is a direct path to a yaml file, use it directly
+    if config_path.endswith('.yaml'):
+        config_file = config_path
     else:
-        config_name = f"{dataset_name}.yaml"
+        # Otherwise, construct path based on dataset name
+        if dataset_name == "I":
+            config_name = "imagenet.yaml"
+        elif dataset_name in ["A", "V", "R", "S"]:
+            config_name = f"imagenet_{dataset_name.lower()}.yaml"
+        elif dataset_name == "C":
+            config_name = "cifar10c.yaml"
+        else:
+            config_name = f"{dataset_name}.yaml"
+        
+        config_file = os.path.join(config_path, config_name)
     
-    config_file = os.path.join(config_path, config_name)
-    
-    with open(config_file, 'r') as file:
-        cfg = yaml.load(file, Loader=yaml.SafeLoader)
-
     if not os.path.exists(config_file):
         raise FileNotFoundError(f"The configuration file {config_file} was not found.")
-
+    
+    print(f"Loading config file: {config_file}")
+    with open(config_file, 'r') as file:
+        cfg = yaml.load(file, Loader=yaml.SafeLoader)
+    
     return cfg
 
 
