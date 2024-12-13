@@ -130,6 +130,9 @@ def get_config_file(config_path, dataset_name):
 
     if not os.path.exists(config_file):
         raise FileNotFoundError(f"The configuration file {config_file} was not found.")
+    
+    print("\nRunning dataset configurations:")
+    print(cfg, "\n")
 
     return cfg
 

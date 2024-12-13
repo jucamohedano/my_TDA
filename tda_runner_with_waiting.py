@@ -214,8 +214,6 @@ def main():
         print(f"Processing {dataset_name} dataset.")
 
         cfg = get_config_file(config_path, dataset_name_mapped)
-        print("\nRunning dataset configurations:")
-        print(cfg, "\n")
 
         if dataset_name_mapped == 'C':
             # Special handling for CIFAR-10-C

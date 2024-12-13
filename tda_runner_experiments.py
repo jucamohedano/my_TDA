@@ -103,7 +103,6 @@ def run_test_tda(pos_cfg, neg_cfg, loader, clip_model, clip_weights):
         return sum(accuracies)/len(accuracies)
 
 
-
 def main():
     args = get_arguments()
     config_path = args.config
@@ -125,9 +124,9 @@ def main():
     for dataset_name in datasets:
         print(f"Processing {dataset_name} dataset.")
         
-        cfg = get_config_file(config_path, dataset_name)
-        
         if dataset_name == 'C':
+            cfg = get_config_file(config_path, dataset_name)
+            
             # Special handling for CIFAR-10-C
             test_loaders = build_test_data_loader(dataset_name, args.data_root, preprocess)
             all_accs = []
@@ -168,6 +167,7 @@ def main():
             test_loader, classnames, template = build_test_data_loader(dataset_name, args.data_root, preprocess)
             clip_weights = clip_classifier(classnames, template, clip_model)
 
+            cfg = get_config_file(config_path, dataset_name)
             if args.wandb:
                 run_name = f"{dataset_name}"
                 run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
@@ -177,6 +177,139 @@ def main():
             if args.wandb:
                 wandb.log({f"{dataset_name}": acc})
                 run.finish()
+            
+            # ------------------------------------ Positive ------------------------------------------------–
+            # shot_capacity: 3
+            cfg = get_config_file(config_path, dataset_name)
+            shot_capacities = [1, 2, 3, 4, 5, 6]
+            for s in shot_capacities:
+                cfg['positive']['shot_capacity'] = s
+                if args.wandb:
+                    run_name = f"positive_shot_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"positive_shot_{s}": acc})
+                    run.finish()
+                
+            # alpha: 2.0
+            cfg = get_config_file(config_path, dataset_name)
+            alphas = [1, 2, 3, 4, 5]
+            for s in alphas:
+                cfg['positive']['alpha'] = s
+                if args.wandb:
+                    run_name = f"positive_alpha_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"positive_alpha_{s}": acc})
+                    run.finish()
+
+
+            # beta: 7.0 
+            cfg = get_config_file(config_path, dataset_name)
+            betas = [0.5, 1, 3, 5, 7]
+            for s in alphas:
+                cfg['positive']['beta'] = s
+                if args.wandb:
+                    run_name = f"positive_beta_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"positive_beta_{s}": acc})
+                    run.finish()
+            
+            # --- Negative Cache Configuration ---
+
+            # shot_capacity: 2
+            cfg = get_config_file(config_path, dataset_name)
+            for s in shot_capacities:
+                cfg['negative']['shot_capacity'] = s
+                if args.wandb:
+                    run_name = f"negative_capacity_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"negative_capacity_{s}": acc})
+                    run.finish()
+
+            # alpha: 0.117
+            alphas = [0.05, 0.1, 0.15, 0.2, 0.5, 1]
+            cfg = get_config_file(config_path, dataset_name)
+            for s in alphas:
+                cfg['negative']['alpha'] = s
+                if args.wandb:
+                    run_name = f"negative_capacity_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"negative_capacity_{s}": acc})
+                    run.finish()
+            
+            # beta: 1.0
+            cfg = get_config_file(config_path, dataset_name)
+            for s in betas:
+                cfg['negative']['beta'] = s
+                if args.wandb:
+                    run_name = f"negative_beta_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"negative_beta_{s}": acc})
+                    run.finish()
+
+            # entropy_threshold:
+            #     lower: 0.2
+            #     upper: 0.5 
+            lowers = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+            add = [0.2, 0.3]
+
+            cfg = get_config_file(config_path, dataset_name)
+            for l in lowers:
+                for a in add:
+                    upper = l + a
+                    cfg['negative']['entropy_threshold']['lower'] = l
+                    cfg['negative']['entropy_threshold']['upper'] = upper
+                    if args.wandb:
+                        run_name = f"entr_th_{l}_{upper}"
+                        run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                    acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                    if args.wandb:
+                        wandb.log({f"entr_th_{l}_{upper}": acc})
+                        run.finish()
+
+            # mask_threshold:
+            #     lower: 0.03
+            #     upper: 1.0
+
+            masks = [0.01, 0.05, 0.1, 0.2, 0.3]
+            cfg = get_config_file(config_path, dataset_name)
+            for s in masks:
+                cfg['negative']['mask_threshold']['lower'] = s
+                if args.wandb:
+                    run_name = f"mask_th_{s}"
+                    run = wandb.init(project="ETTA-CLIP", config=cfg, group=group_name, name=run_name)
+
+                acc = run_test_tda(cfg['positive'], cfg['negative'], test_loader, clip_model, clip_weights)
+
+                if args.wandb:
+                    wandb.log({f"mask_th_{s}": acc})
+                    run.finish()
+
 
 if __name__ == "__main__":
     main()
