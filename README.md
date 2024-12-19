@@ -4,11 +4,11 @@
 
 Course-project for *"Trends and Applications in Computer Vision"* of prof. M. Mancini and G. Boato.
 
-[Here](Final_presentation.pdf) you can find our **final presentation** for the results.
+[Here](exam/Final_presentation.pdf) you can find our **final presentation** for the results.
 
-[Here](Related_Works.pdf) you can find the **related works** we studied.
+[Here](exam/Related_Works.pdf) you can find the report about the **related works** we studied with our [presentation](exam/Related_Works_slides.pdf).
 
-by [Juan Camacho Mohedano](https://github.com/jucamohedano), [Andrea De Carlo](https://github.com/Dr3dre), [Samuele Bolotta](linkedin.com/in/samuele-bolotta-841b16160)
+by [Juan Camacho Mohedano](https://linkedin.com/in/juan-camacho-mohedano-9a425b1b2), [Andrea De Carlo](https://www.linkedin.com/in/andreadecarlo), [Samuele Bolotta](https://linkedin.com/in/samuele-bolotta-841b16160)
 
 Please refer to the official [README](README_official.md) of the original project for the configuration of the original code.
 
@@ -22,7 +22,7 @@ with failure cases on CIFAR-10-C (non-iid data stream) ![CD_benchmark](docs/CD_b
 
 - We tried to mitigate the issues adding a [Waiting List](tda_runner_with_waiting.py) to the model, which improved performance on ImageNet but didn’t help on more challenging dataset like as CIFAR10-C ![waiting list](docs/waiting_list.png)
 
-You can find better details in the [final presentation](Final_presentation.pdf)
+You can find better details in the [final presentation](exam/Final_presentation.pdf)
 
 ## file added:
 - [tda_cd_benchmark.ipynb](tda_cd_benchmark.ipynb)
